@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arkanoid</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game">
+    <div id="hud">
+      <span>Puntos: <strong id="score">0</strong></span>
+      <span id="lives-box">Vidas: <span id="lives"></span></span>
+      <button id="restart">Reiniciar</button>
+    </div>
+
+    <div id="stage">
+      <canvas id="board" width="800" height="600"></canvas>
+      <div id="overlay" class="hidden">
+        <p id="overlay-text"></p>
+      </div>
+    </div>
+
+    <p id="help">Ratón o flechas ← → para mover · Espacio o clic para sacar · Esc / P para pausar</p>
+  </div>
+
+  <script src="assets/spritesheet.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
