@@ -3,6 +3,7 @@
 // ---- DOM ----
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
+const levelEl = document.getElementById("level");
 const scoreEl = document.getElementById("score");
 const livesEl = document.getElementById("lives");
 const overlayEl = document.getElementById("overlay");
@@ -28,16 +29,54 @@ const LIVES_START = 3;
 const MAX_DT = 0.05;                      // s: acota el delta si la pestaña estuvo en segundo plano
 const LAUNCH_ANGLE = 30 * Math.PI / 180;  // desde la vertical, al sacar
 
-// Nivel: una fila por línea, un carácter por bloque
+// Niveles: uno por elemento, una fila por línea, un carácter por bloque.
+// Cada matriz debe tener exactamente ROWS strings de COLS caracteres.
 // r=red  p=hotpink  m=magenta  y=yellow  g=green  c=cyan  G=gris(2 golpes)  .=vacío
-const LEVEL = [
-  "rrrrGGrrrr",
-  "pppppppppp",
-  "mmmmmmmmmm",
-  "yyyyGGyyyy",
-  "gggggggggg",
-  "cccccccccc",
+// La dificultad sube por forma y por número de grises: 4, 6, 8, 10, 14.
+const LEVELS = [
+  [ // 1 — filas completas. 4 grises.
+    "rrrrGGrrrr",
+    "pppppppppp",
+    "mmmmmmmmmm",
+    "yyyyGGyyyy",
+    "gggggggggg",
+    "cccccccccc",
+  ],
+  [ // 2 — tablero de ajedrez. 6 grises.
+    "r.r.G.r.r.",
+    ".p.p.p.G.p",
+    "m.G.m.m.m.",
+    ".y.y.G.y.y",
+    "g.g.G.g.g.",
+    ".c.c.c.c.G",
+  ],
+  [ // 3 — paraguas: copa roja y mango magenta. 8 grises.
+    "...rGGr...",
+    "..rrGGrr..",
+    ".GrrrrrrG.",
+    "....mm....",
+    "....mm....",
+    "..GGm.....",
+  ],
+  [ // 4 — dos nubes cian con base gris. 10 grises.
+    ".cc....cc.",
+    "ccGc..cGcc",
+    ".GG....GG.",
+    "...cccc...",
+    "..cccccc..",
+    "...GGGG...",
+  ],
+  [ // 5 — cara de Super Mario: gorra roja, ojos y bigote grises. 14 grises.
+    "..rrrrrr..",
+    ".rrrrrrrr.",
+    ".yyGyyGyy.",
+    ".yyyyyyyy.",
+    ".GGGGGGGG.",
+    "..yGGGGy..",
+  ],
 ];
+const LEVEL_COUNT = LEVELS.length;
+const CHEAT_CODE = "LEVEL";               // se teclea con el juego en pausa
 
 // Carácter del nivel -> clave de color en SPRITES.blocks / EXPLOSION_FRAMES
 const CHAR_COLORS = {
@@ -69,8 +108,11 @@ let bricks = [];   // [{ x, y, color, hits, alive }]  hits = golpes restantes (1
 let paddle = { x: 0, w: PADDLE_W };
 let ball = { x: 0, y: 0, vx: 0, vy: 0, stuck: true };
 let explosions = [];   // [{ x, y, color, start }]  start = timestamp del inicio
+let level = 1;   // 1..LEVEL_COUNT; el acceso al array es LEVELS[level - 1]
 let score = 0, lives = LIVES_START, broken = 0;
 let paused = false, gameOver = false, won = false;
+let levelClear = false;   // nivel superado, esperando espacio o clic para continuar
+let cheatBuf = "";        // últimas letras tecleadas, solo mientras hay pausa
 let keys = { left: false, right: false };
 let lastTime = 0, animId = null;
 
@@ -83,10 +125,33 @@ let muted = MUTED_DEFAULT;
 
 // ---- Inicialización ----
 function init() {
+  paddle.x = (W - PADDLE_W) / 2;
+  paddle.w = PADDLE_W;
+
+  score = 0;
+  lives = LIVES_START;
+  paused = false;
+  gameOver = false;
+  won = false;
+  keys.left = false;
+  keys.right = false;
+  lastTime = 0;
+
+  loadLevel(1);
+  hideOverlay();
+}
+
+// Monta la rejilla del nivel n (1-indexado). No toca puntuación ni vidas: cambiar
+// de nivel conserva ambas. `broken` sí se reinicia, así que cada nivel empieza a
+// la velocidad base de la bola.
+function loadLevel(n) {
+  level = n;
+  const grid = LEVELS[n - 1];
+
   bricks = [];
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
-      const ch = LEVEL[row][col];
+      const ch = grid[row][col];
       const color = CHAR_COLORS[ch];
       if (!color) continue;   // '.' o carácter desconocido -> hueco
       bricks.push({
@@ -99,23 +164,10 @@ function init() {
     }
   }
 
-  paddle.x = (W - PADDLE_W) / 2;
-  paddle.w = PADDLE_W;
-  resetBall();
-
   explosions = [];
-  score = 0;
-  lives = LIVES_START;
   broken = 0;
-  paused = false;
-  gameOver = false;
-  won = false;
-  keys.left = false;
-  keys.right = false;
-  lastTime = 0;
-
+  resetBall();
   updateHUD();
-  hideOverlay();
 }
 
 // Deja la bola pegada al centro del paddle, sin velocidad, a la espera del saque.
@@ -129,6 +181,8 @@ function resetBall() {
 
 // Saca la bola hacia arriba con una desviación aleatoria dentro de LAUNCH_ANGLE.
 function launchBall() {
+  // Con el nivel superado, el mismo gesto del saque sirve para continuar.
+  if (levelClear) { nextLevel(); return; }
   if (!ball.stuck || paused || gameOver || won) return;
   ball.stuck = false;
   const angle = (Math.random() * 2 - 1) * LAUNCH_ANGLE;
@@ -239,6 +293,7 @@ function syncMuteButton() {
 
 // ---- HUD y overlay ----
 function updateHUD() {
+  levelEl.textContent = level;
   scoreEl.textContent = score;
   drawLives();
 }
@@ -316,6 +371,23 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { launchBall(); e.preventDefault(); }
   if (e.key === "Escape" || e.key === "p" || e.key === "P") { togglePause(); e.preventDefault(); }
   if (e.key === "m" || e.key === "M") { setMuted(!muted); e.preventDefault(); }
+
+  // Truco: teclear LEVEL con el juego en pausa salta al nivel siguiente. Se mira
+  // después de las teclas ya gestionadas, así que Esc y P (que quitan la pausa)
+  // no llegan a alimentar el buffer. cheatBuf es una ventana deslizante de las
+  // últimas CHEAT_CODE.length letras: una secuencia mal tecleada no bloquea,
+  // basta con volver a escribir el truco entero.
+  if (paused && !gameOver && !won && !levelClear) {
+    if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+      cheatBuf = (cheatBuf + e.key.toUpperCase()).slice(-CHEAT_CODE.length);
+      if (cheatBuf === CHEAT_CODE) {
+        cheatBuf = "";
+        cheatSkipLevel();
+      }
+    } else {
+      cheatBuf = "";
+    }
+  }
 });
 
 document.addEventListener("keyup", (e) => {
@@ -407,7 +479,9 @@ function hitBricks() {
       explosions.push({ x: b.x, y: b.y, color: b.color, start: performance.now() });
       applySpeed();
       updateHUD();
-      if (bricks.every((br) => !br.alive)) winGame();
+      if (bricks.every((br) => !br.alive)) {
+        if (level < LEVEL_COUNT) completeLevel(); else winGame();
+      }
     }
     return;
   }
@@ -430,18 +504,59 @@ function winGame() {
   showOverlay("¡VICTORIA!\nPuntuación: " + score);
 }
 
+// ---- Progresión de nivel ----
+// Nivel 1..LEVEL_COUNT-1 despejado: una vida extra (sin tope) y el juego se para
+// hasta que el jugador continúe. El bucle sigue pintando lo justo para que se
+// apague la última explosión, igual que en game over o victoria.
+function completeLevel() {
+  levelClear = true;
+  lives++;
+  updateHUD();
+  showOverlay("¡NIVEL " + level + " COMPLETADO!\nPuntuación: " + score);
+}
+
+// Carga el nivel siguiente y reanuda, con la bola pegada al paddle.
+function nextLevel() {
+  hideOverlay();
+  levelClear = false;
+  loadLevel(level + 1);
+  resumeLoop();
+}
+
+// Truco: salta al nivel siguiente desde la pausa. En el último nivel no hay
+// siguiente, así que dispara la victoria en vez de no hacer nada.
+function cheatSkipLevel() {
+  paused = false;
+  hideOverlay();
+  if (level >= LEVEL_COUNT) {
+    winGame();
+    return;   // el bucle sigue parado: la victoria no necesita reanudarlo
+  }
+  loadLevel(level + 1);
+  resumeLoop();
+}
+
+// Única vía de relanzar el bucle tras una parada. Cancela el animId vivo antes:
+// si se reanuda mientras aún se pinta una explosión, el bucle seguiría corriendo
+// y quedarían dos.
+function resumeLoop() {
+  if (animId !== null) cancelAnimationFrame(animId);
+  lastTime = 0;   // sin esto, el tiempo parado se colaría como un salto de delta
+  animId = requestAnimationFrame(loop);
+}
+
 // ---- Pausa ----
 function togglePause() {
-  if (gameOver || won) return;
+  if (gameOver || won || levelClear) return;
   paused = !paused;
+  cheatBuf = "";   // el truco no sobrevive a entrar ni a salir de la pausa
   if (paused) {
     if (animId !== null) cancelAnimationFrame(animId);
     animId = null;
     showOverlay("PAUSA");
   } else {
     hideOverlay();
-    lastTime = 0;   // sin esto, el delta acumulado durante la pausa daría un salto
-    animId = requestAnimationFrame(loop);
+    resumeLoop();
   }
 }
 
@@ -496,12 +611,12 @@ function loop(ts) {
   const dt = Math.min((ts - lastTime) / 1000, MAX_DT);
   lastTime = ts;
 
-  if (!paused && !gameOver && !won) update(dt);
+  if (!paused && !gameOver && !won && !levelClear) update(dt);
   draw();
 
-  // Tras game over o victoria se sigue pintando hasta que se apaga la última
-  // explosión; luego el bucle se detiene.
-  if (paused || ((gameOver || won) && explosions.length === 0)) {
+  // Tras game over, victoria o nivel completado se sigue pintando hasta que se
+  // apaga la última explosión; luego el bucle se detiene.
+  if (paused || ((gameOver || won || levelClear) && explosions.length === 0)) {
     animId = null;
     return;
   }
