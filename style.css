@@ -52,6 +52,28 @@ body {
   image-rendering: pixelated;
 }
 
+/* Control de sonido: botón de mute + slider de volumen */
+#sound-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#mute {
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#volume {
+  width: 100px;
+  accent-color: #ffd93d;
+  cursor: pointer;
+}
+
 #restart {
   margin-left: auto;
   padding: 6px 16px;

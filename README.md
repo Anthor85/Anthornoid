@@ -23,6 +23,8 @@ python3 -m http.server 8000   # o npx serve .  /  php -S localhost:8000
 | Mover el paddle | Mover el ratón sobre el canvas, o flechas ← → |
 | Sacar la bola | Espacio o clic |
 | Pausar / reanudar | `Esc` o `P` |
+| Silenciar / activar sonido | `M`, o el botón 🔊 / 🔇 del HUD |
+| Ajustar el volumen | Slider del HUD, junto a las vidas |
 | Reiniciar | Botón **Reiniciar** del HUD |
 
 ## Cómo se juega
@@ -34,5 +36,10 @@ python3 -m http.server 8000   # o npx serve .  /  php -S localhost:8000
 - Cada 10 bloques rotos la bola acelera 20 px/s, hasta un tope de 520 px/s.
 - Se pierde una vida cuando la bola cae por abajo. Con 0 vidas, game over. Rompiendo los 60 bloques, victoria.
 
-Esta versión no reproduce sonido.
+## Sonido
+
+- La bola suena al rebotar en las paredes, en el paddle y al golpear un bloque gris sin romperlo.
+- Al destruir un bloque suena el efecto de rotura.
+- El volumen y el mute se recuerdan entre sesiones.
+- Si abres el juego por `file://` puede que el navegador bloquee la carga de los `.mp3`. El juego funciona igual, solo que mudo; sírvelo por HTTP para oírlo.
 # Anthornoid

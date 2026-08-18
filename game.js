@@ -8,6 +8,8 @@ const livesEl = document.getElementById("lives");
 const overlayEl = document.getElementById("overlay");
 const overlayTextEl = document.getElementById("overlay-text");
 const restartBtn = document.getElementById("restart");
+const volumeEl = document.getElementById("volume");
+const muteEl = document.getElementById("mute");
 
 // ---- Constantes de layout (px) ----
 const W = 800, H = 600;
@@ -51,6 +53,17 @@ const CHAR_COLORS = {
 // Puntuación por color
 const SCORES = { red: 70, hotpink: 60, magenta: 50, yellow: 40, green: 30, cyan: 20, gray: 100 };
 
+// ---- Audio ----
+const SOUNDS = {
+  bounce: "assets/sounds/ball-bounce.mp3",
+  break: "assets/sounds/break-sound.mp3",
+};
+const AUDIO_POOL = 8;                      // clones precargados por sonido (permiten solapamiento sin latencia)
+const VOLUME_DEFAULT = 50;                 // 0-100, primera visita
+const MUTED_DEFAULT = false;
+const STORE_VOLUME = "arkanoid.v1.volume";
+const STORE_MUTED = "arkanoid.v1.muted";
+
 // ---- Estado ----
 let bricks = [];   // [{ x, y, color, hits, alive }]  hits = golpes restantes (1, o 2 en gris)
 let paddle = { x: 0, w: PADDLE_W };
@@ -60,6 +73,13 @@ let score = 0, lives = LIVES_START, broken = 0;
 let paused = false, gameOver = false, won = false;
 let keys = { left: false, right: false };
 let lastTime = 0, animId = null;
+
+// Estado de audio: es preferencia de usuario, no estado de partida, así que
+// vive fuera de init() y sobrevive al botón Reiniciar.
+let audio = {};                // { bounce: [HTMLAudioElement], break: [...] } pool precargado por sonido
+let audioIdx = {};             // { bounce: 0, break: 0 } siguiente elemento del pool a usar
+let volume = VOLUME_DEFAULT;   // 0-100
+let muted = MUTED_DEFAULT;
 
 // ---- Inicialización ----
 function init() {
@@ -114,6 +134,107 @@ function launchBall() {
   const angle = (Math.random() * 2 - 1) * LAUNCH_ANGLE;
   ball.vx = Math.sin(angle) * BALL_SPEED_BASE;
   ball.vy = -Math.cos(angle) * BALL_SPEED_BASE;
+}
+
+// ---- Audio ----
+// Precarga un pool de AUDIO_POOL elementos por sonido. Clonar en el momento del
+// impacto metía latencia audible (cada clon rearranca su carga y decode); con el
+// pool ya decodificado el play() es inmediato. Si un mp3 no existe o el navegador
+// bloquea la carga el fallo es silencioso: el juego se queda mudo pero jugable.
+function loadSounds() {
+  audio = {};
+  audioIdx = {};
+  for (const name in SOUNDS) {
+    try {
+      const pool = [];
+      for (let i = 0; i < AUDIO_POOL; i++) {
+        const a = new Audio(SOUNDS[name]);
+        a.preload = "auto";
+        a.addEventListener("error", () => {});   // evita el error no capturado
+        a.load();                                // fuerza la descarga y el decode ya
+        pool.push(a);
+      }
+      audio[name] = pool;
+      audioIdx[name] = 0;
+    } catch (err) {
+      /* sin sonido para esta clave */
+    }
+  }
+}
+
+// Reproduce el siguiente elemento del pool, rotando: así dos sonidos iguales se
+// solapan en vez de cortarse. La promesa de play() se ignora (autoplay policy).
+function playSound(name) {
+  if (muted || volume === 0) return;
+  const pool = audio[name];
+  if (!pool || pool.length === 0) return;
+  try {
+    const a = pool[audioIdx[name]];
+    audioIdx[name] = (audioIdx[name] + 1) % pool.length;
+    a.currentTime = 0;
+    a.volume = volume / 100;
+    const p = a.play();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (err) {
+    /* el audio es accesorio: nunca debe romper el juego */
+  }
+}
+
+// Lee las preferencias guardadas. Cualquier valor ausente, corrupto o fuera de
+// rango cae al default. localStorage puede lanzar (modo privado, file://).
+function loadAudioPrefs() {
+  try {
+    // Ojo: getItem devuelve null si la clave no existe, y Number(null) es 0.
+    // Hay que descartar el string vacío o nulo antes de convertir.
+    const raw = localStorage.getItem(STORE_VOLUME);
+    const v = raw === null || raw === "" ? NaN : Number(raw);
+    volume = Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : VOLUME_DEFAULT;
+    muted = localStorage.getItem(STORE_MUTED) === "true";
+  } catch (err) {
+    volume = VOLUME_DEFAULT;
+    muted = MUTED_DEFAULT;
+  }
+}
+
+// Si localStorage falla el juego sigue: solo pierde la persistencia.
+function saveAudioPrefs() {
+  try {
+    localStorage.setItem(STORE_VOLUME, String(volume));
+    localStorage.setItem(STORE_MUTED, muted ? "true" : "false");
+  } catch (err) {
+    /* sin persistencia */
+  }
+}
+
+// Ajusta el volumen global (0-100) y sincroniza el slider.
+function setVolume(v) {
+  if (!Number.isFinite(v)) v = VOLUME_DEFAULT;
+  volume = Math.max(0, Math.min(100, Math.round(v)));
+  syncVolumeSlider();
+  saveAudioPrefs();
+}
+
+// Silencia o restaura el audio. `volume` guarda siempre el nivel elegido; el
+// slider muestra el volumen efectivo, así que baja a 0 al mutear y vuelve a su
+// sitio al desmutear.
+function setMuted(m) {
+  muted = !!m;
+  syncMuteButton();
+  syncVolumeSlider();
+  saveAudioPrefs();
+}
+
+// El slider refleja el volumen efectivo: 0 mientras esté muteado.
+function syncVolumeSlider() {
+  volumeEl.value = muted ? 0 : volume;
+}
+
+// Refleja el estado de mute en el botón: icono y textos accesibles.
+function syncMuteButton() {
+  muteEl.textContent = muted ? "🔇" : "🔊";
+  muteEl.setAttribute("aria-pressed", muted ? "true" : "false");
+  muteEl.title = muted ? "Activar sonido (M)" : "Silenciar (M)";
+  muteEl.setAttribute("aria-label", muted ? "Activar sonido" : "Silenciar");
 }
 
 // ---- HUD y overlay ----
@@ -194,11 +315,26 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight") { keys.right = true; e.preventDefault(); }
   if (e.code === "Space") { launchBall(); e.preventDefault(); }
   if (e.key === "Escape" || e.key === "p" || e.key === "P") { togglePause(); e.preventDefault(); }
+  if (e.key === "m" || e.key === "M") { setMuted(!muted); e.preventDefault(); }
 });
 
 document.addEventListener("keyup", (e) => {
   if (e.key === "ArrowLeft") keys.left = false;
   if (e.key === "ArrowRight") keys.right = false;
+});
+
+volumeEl.addEventListener("input", () => {
+  // Mover el slider estando muteado quita el mute: si no, el control parecería roto.
+  if (muted) {
+    muted = false;
+    syncMuteButton();
+  }
+  setVolume(Number(volumeEl.value));
+});
+
+muteEl.addEventListener("click", () => {
+  muteEl.blur();   // si no, espacio volvería a pulsar el botón en vez de sacar
+  setMuted(!muted);
 });
 
 restartBtn.addEventListener("click", () => {
@@ -237,6 +373,7 @@ function hitPaddle() {
   ball.vx = Math.sin(angle) * speed;
   ball.vy = -Math.cos(angle) * speed;
   ball.y = PADDLE_Y - BALL_SIZE;   // la despega para no encadenar rebotes
+  playSound("bounce");
 }
 
 // Colisión bola-bloque: como mucho un impacto por frame.
@@ -259,7 +396,11 @@ function hitBricks() {
     }
 
     b.hits--;
-    if (b.hits <= 0) {
+    if (b.hits > 0) {
+      // Gris al primer golpe: rebotó pero no rompió.
+      playSound("bounce");
+    } else {
+      playSound("break");
       b.alive = false;
       score += SCORES[b.color];
       broken++;
@@ -331,13 +472,16 @@ function update(dt) {
   if (ball.x <= 0) {
     ball.x = 0;
     ball.vx = -ball.vx;
+    playSound("bounce");
   } else if (ball.x + BALL_SIZE >= W) {
     ball.x = W - BALL_SIZE;
     ball.vx = -ball.vx;
+    playSound("bounce");
   }
   if (ball.y <= 0) {
     ball.y = 0;
     ball.vy = -ball.vy;
+    playSound("bounce");
   }
 
   hitPaddle();
@@ -365,6 +509,11 @@ function loop(ts) {
 }
 
 // ---- Arranque ----
+loadSounds();
+loadAudioPrefs();
+syncMuteButton();
+syncVolumeSlider();   // el estado leído manda sobre el value del HTML
+
 loadSpritesheet(() => {
   init();
   animId = requestAnimationFrame(loop);
